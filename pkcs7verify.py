@@ -1,12 +1,14 @@
 #!/usr/bin/python
 # coding=utf-8
-from pyasn1.type import tag, namedtype, namedval, univ, char, useful
-from pyasn1.error import PyAsn1Error
-from pyasn1.codec.der.decoder import decode
-from pyasn1.codec.der.encoder import encode
-import base64
 import binascii
 import hashlib
+import struct
+import math
+
+from pyasn1.codec.der.decoder import decode
+from pyasn1.codec.der.encoder import encode
+from pyasn1.error import PyAsn1Error
+from pyasn1.type import tag, namedtype, namedval, univ, char, useful
 
 DEBUG = False
 
@@ -60,7 +62,7 @@ Name_oid = {
     "2.5.4.10": "O",
     "2.5.4.11": "OU",
     "2.5.4.45": "X500UID",
-    "1.2.840.113549.1.9.1": "email",
+    "1.2.840.113549.1.9.1": "emailAddress",
     "2.5.4.17": "zip",
     "2.5.4.9": "street",
     "2.5.4.15": "businessCategory",
@@ -123,6 +125,97 @@ ExtendedKeyUsageExt_oid = {
     "1.3.6.1.5.5.7.3.8": "timeStamping",
 }
 
+##########################################################################################################################################################################
+
+secp192k1 = dict(
+    p = 2**192 - 2**32 - 2**12 - 2**8 - 2**7 - 2**6 - 2**3 - 1,
+    a = 0,
+    b = 3,
+    Gx= 0xDB4FF10EC057E9AE26B07D0280B7F4341DA5D1B1EAE06C7DL,
+    Gy= 0x9B2F2F6D9C5628A7844163D015BE86344082AA88D95E2F9DL,
+    n = 0xFFFFFFFFFFFFFFFFFFFFFFFE26F2FC170F69466A74DEFD8DL,
+)
+secp192r1 = dict(
+    p = 2**192 - 2**64 - 1,
+    a = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFFFFFFFFFCL,
+    b = 0x64210519E59C80E70FA7E9AB72243049FEB8DEECC146B9B1L,
+    Gx= 0x188DA80EB03090F67CBF20EB43A18800F4FF0AFD82FF1012L,
+    Gy= 0x07192B95FFC8DA78631011ED6B24CDD573F977A11E794811L,
+    n = 0xFFFFFFFFFFFFFFFFFFFFFFFF99DEF836146BC9B1B4D22831L,
+)
+secp224k1 = dict(
+    p = 2**224 - 2**32 - 2**12 - 2**11 - 2**9 - 2**7 - 2**4 - 2 - 1,
+    a = 0,
+    b = 5,
+    Gx= 0xA1455B334DF099DF30FC28A169A467E9E47075A90F7E650EB6B7A45CL,
+    Gy= 0x7E089FED7FBA344282CAFBD6F7E319F7C0B0BD59E2CA4BDB556D61A5L,
+    n = 0x010000000000000000000000000001DCE8D2EC6184CAF0A971769FB1F7L,
+)
+secp224r1 = dict(
+    p = 2**224 - 2**96 + 1,
+    a = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFFFFFFFFFFFFFFFFFEL,
+    b = 0xB4050A850C04B3ABF54132565044B0B7D7BFD8BA270B39432355FFB4L,
+    Gx= 0xB70E0CBD6BB4BF7F321390B94A03C1D356C21122343280D6115C1D21L,
+    Gy= 0xBD376388B5F723FB4C22DFE6CD4375A05A07476444D5819985007E34L,
+    n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFF16A2E0B8F03E13DD29455C5C2A3DL,
+)
+secp256k1 = dict(
+    p = 2**256 - 2**32 - 2**9 - 2**8 - 2**7 - 2**6 - 2**4 - 1,
+    a = 0,
+    b = 7,
+    Gx= 0x79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798L,
+    Gy= 0x483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8L,
+    n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141L,
+)
+secp256r1 = dict(
+    p = 2**224 * (2**32 - 1) + 2**192 + 2**96 - 1,
+    a = 0xFFFFFFFF00000001000000000000000000000000FFFFFFFFFFFFFFFFFFFFFFFCL,
+    b = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604BL,
+    Gx= 0x6B17D1F2E12C4247F8BCE6E563A440F277037D812DEB33A0F4A13945D898C296L,
+    Gy= 0x4FE342E2FE1A7F9B8EE7EB4A7C0F9E162BCE33576B315ECECBB6406837BF51F5L,
+    n = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551L,
+)
+secp384r1 = dict(
+    p = 2**384 - 2**128 - 2**96 + 2**32 - 1,
+    a = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFFFF0000000000000000FFFFFFFCL,
+    b = 0xB3312FA7E23EE7E4988E056BE3F82D19181D9C6EFE8141120314088F5013875AC656398D8A2ED19D2A85C8EDD3EC2AEFL,
+    Gx= 0xAA87CA22BE8B05378EB1C71EF320AD746E1D3B628BA79B9859F741E082542A385502F25DBF55296C3A545E3872760AB7L,
+    Gy= 0x3617DE4A96262C6F5D9E98BF9292DC29F8F41DBD289A147CE9DA3113B5F0B8C00A60B1CE1D7E819D7A431D7C90EA0E5FL,
+    n = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFC7634D81F4372DDF581A0DB248B0A77AECEC196ACCC52973,
+)
+secp521r1 = dict(
+    p = 2**521-1,
+    a = 0x01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFCL,
+    b = 0x0051953EB9618E1C9A1F929A21A0B68540EEA2DA725B99B315F3B8B489918EF109E156193951EC7E937B1652C0BD3BB1BF073573DF883D2C34F1EF451FD46B503F00L,
+    Gx= 0x00C6858E06B70404E9CD9E3ECB662395B4429C648139053FB521F828AF606B4D3DBAA14B5E77EFE75928FE1DC127A2FFA8DE3348B3C1856A429BF97E7E31C2E5BD66L,
+    Gy= 0x011839296A789A3BC0045C8A5FB42C7D1BD998F54449579B446817AFBD17273E662C97EE72995EF42640C550B9013FAD0761353C7086A272C24088BE94769FD16650L,
+    n = 0x01FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFA51868783BF2F966B7FCC0148F709A5D03BB5C9B8899C47AEBB6FB71E91386409L,
+)
+
+EC_CURVE = {}
+
+EC_CURVE['1.2.840.10045.3.1.1'] = secp192r1
+EC_CURVE['1.3.132.0.33'] = secp224r1
+EC_CURVE['1.2.840.10045.3.1.7'] = secp256r1
+EC_CURVE['1.3.132.0.34'] = secp384r1
+EC_CURVE['1.3.132.0.35'] = secp521r1
+
+EC_CURVE['secp192r1'] = secp192r1
+EC_CURVE['secp224r1'] = secp224r1
+EC_CURVE['secp256r1'] = secp256r1
+EC_CURVE['secp384r1'] = secp384r1
+EC_CURVE['secp521r1'] = secp521r1
+
+EC_CURVE['NIST192p'] = secp192r1
+EC_CURVE['NIST224p'] = secp224r1
+EC_CURVE['NIST256p'] = secp256r1
+EC_CURVE['NIST384p'] = secp384r1
+EC_CURVE['NIST521p'] = secp521r1
+
+EC_CURVE['1.3.132.0.10'] = secp256k1
+EC_CURVE['secp256k1'] = secp256k1
+
+##########################################################################################################################################################################
 
 class Modulus(univ.OctetString):
     tagSet = univ.OctetString.tagSet.tagImplicitly(
@@ -136,10 +229,8 @@ class RsaPubKey(univ.Sequence):
         namedtype.NamedType("exp", univ.Integer())
     )
 
-
 class DsaPubKey(univ.Integer):
     pass
-
 
 class DssParams(univ.Sequence):
     componentType = namedtype.NamedTypes(
@@ -148,13 +239,11 @@ class DssParams(univ.Sequence):
         namedtype.NamedType("g", univ.Integer()),
     )
 
-
 class Dss_Sig_Value(univ.Sequence):
     componentType = namedtype.NamedTypes(
         namedtype.NamedType('r', univ.Integer()),
         namedtype.NamedType('s', univ.Integer())
     )
-
 
 class ConvertibleBitString(univ.BitString):
     def toOctets(self):
@@ -536,6 +625,7 @@ class KeyId(univ.Sequence):
 class PKCS7_Name():
     def __init__(self, name):
         self.__attributes = {}
+        self.attributes_sorted = []
         for name_part in name:
             for attr in name_part:
                 type = str(attr.getComponentByPosition(0).getComponentByName('type'))
@@ -543,17 +633,21 @@ class PKCS7_Name():
                 typeStr = Name_oid.get(type) or type
                 values = self.__attributes.get(typeStr)
                 if values is None:
+                    #print type, typeStr
                     self.__attributes[typeStr] = [value]
+                    self.attributes_sorted.append(typeStr)
                 else:
                     values.append(value)
 
     def __str__(self):
         valueStrings = []
-        for key in sorted(self.__attributes.keys()):
+        #print self.__attributes.keys()
+        for key in self.attributes_sorted:#sorted(self.__attributes.keys()):
             values = sorted(self.__attributes.get(key))
             valuesStr = ", ".join(["%s=%s" % (key, value) for value in values])
             valueStrings.append(valuesStr)
-        return ", ".join(valueStrings)
+        #print ", ".join(valueStrings)
+        return "/".join(valueStrings)
 
     def get_attributes(self):
         return self.__attributes.copy()
@@ -662,6 +756,10 @@ class PKCS7_SignedData():
 #######################################################
 #DSA RSA 算法
 #######################################################
+
+def bytes_to_long(encoded):
+    return reduce(lambda x, y: x * 256 + y, map(ord, encoded))
+
 def _fast_exponentiation(a, p, n):
     result = a % n
     remainders = []
@@ -675,8 +773,8 @@ def _fast_exponentiation(a, p, n):
 
 
 def _rsa_decode(encoded, pub_key):
-    _enc = reduce(lambda x, y: x * 256 + y, map(ord, encoded))
-    _mod = reduce(lambda x, y: x * 256 + y, map(ord, pub_key["mod"]))
+    _enc = bytes_to_long(encoded)
+    _mod = bytes_to_long(pub_key["mod"])
     _exp = pub_key["exp"]
     rr = _fast_exponentiation(_enc, _exp, _mod)
     rt = ""
@@ -724,17 +822,154 @@ def _dsa_decode(encoded, pub_key, fileHash):
     _q = pub_key["q"]
     _g = pub_key["g"]
     _pub = pub_key["pub"]
-    _H = int(fileHash, 16)
+    _H = bytes_to_long(fileHash)
     return _verify((_p, _q, _g), _H, _pub, (r, s))
 
+def inverse_mod(a, m):
+    """Inverse of a mod m."""
+    if a < 0 or m <= a:
+        a = a % m
+    # From Ferguson and Schneier, roughly:
+    c, d = a, m
+    uc, vc, ud, vd = 1, 0, 0, 1
+    while c != 0:
+        q, c, d = divmod(d, c) + (c,)
+        uc, vc, ud, vd = ud - q * uc, vd - q * vc, uc, vc
+    # At this point, d is the GCD, and ud*a+vd*m = d.
+    # If d == 1, this means that ud is a inverse.
+    assert d == 1
+    if ud > 0:
+        return ud
+    else:
+        return ud + m
 
-def sig_hash(signature, public_key_info, fileHash):
+class ECPoint(object):
+    def __init__(self, p=None, a=None, b=None, x=None, y=None, n=None):
+        self.__p = p
+        self.__a = a
+        self.__b = b
+        self.__x = x
+        self.__y = y
+        self.__n = n
+    def __eq__(self, other):
+        if self.__a != other.__a:
+            return False
+        if self.__a != other.__a:
+            return False
+        if self.__b != other.__b:
+            return False
+        if self.__x != other.__x:
+            return False
+        if self.__y != other.__y:
+            return False
+        if self.__n != other.__n:
+            return False
+        return True
+    def __add__(self, other):
+        if other == INFINITY:
+            return self
+        if self == INFINITY:
+            return other
+        if self.__x == other.__x:
+            if (self.__y + other.__y) % self.__p == 0:
+                return INFINITY
+            else:
+                return self.double()
+        l = ((other.__y - self.__y) * inverse_mod(other.__x - self.__x, self.__p)) % self.__p
+        x3 = (l * l - self.__x - other.__x) % self.__p
+        y3 = (l * (self.__x - x3) - self.__y) % self.__p
+        return ECPoint(self.__p, self.__a, self.__b, x3, y3)
+    def __mul__(self, other):
+        """Multiply a point by an integer."""
+        def leftmost_bit(x):
+            assert x > 0
+            result = 1
+            while result <= x:
+                result = 2 * result
+            return result // 2
+        e = other
+        if self.__p:
+            e = e % self.__p
+        if e == 0:
+            return INFINITY
+        if self == INFINITY:
+            return INFINITY
+        assert e > 0
+        e3 = 3 * e
+        negative_self = ECPoint(self.__p, self.__a, self.__b, self.__x, -self.__y, self.__n)
+        i = leftmost_bit(e3) // 2
+        result = self
+        # print_("Multiplying %s by %d (e3 = %d):" % (self, other, e3))
+        while i > 1:
+            result = result.double()
+            if (e3 & i) != 0 and (e & i) == 0:
+                result = result + self
+            if (e3 & i) == 0 and (e & i) != 0:
+                result = result + negative_self
+            # print_(". . . i = %d, result = %s" % ( i, result ))
+            i = i // 2
+        return result
+    def __rmul__(self, other):
+        """Multiply a point by an integer."""
+        return self * other
+    def __str__(self):
+        if self == INFINITY:
+            return "infinity"
+        return "(%d,%d)" % (self.__x, self.__y)
+    def double(self):
+        """Return a new point that is twice the old."""
+        if self == INFINITY:
+            return INFINITY
+        # X9.62 B.3:
+        l = ((3 * self.__x * self.__x + self.__a) * inverse_mod(2 * self.__y, self.__p)) % self.__p
+        x3 = (l * l - 2 * self.__x) % self.__p
+        y3 = (l * (self.__x - x3) - self.__y) % self.__p
+        return ECPoint(self.__p, self.__a, self.__b, x3, y3)
+    def x(self):
+        return self.__x
+    def y(self):
+        return self.__y
+
+INFINITY = ECPoint()
+
+def _ecdsa_decode(encoded, ec_curve, ec_key, fileHash):
+    rs = decode(encoded, asn1Spec=Dss_Sig_Value())[0]
+    r = rs.getComponentByName("r")._value
+    s = rs.getComponentByName("s")._value
+    n = ec_curve["n"]
+    if r < 1 or r > n - 1:
+        return False
+    if s < 1 or s > n - 1:
+        return False
+    c = inverse_mod(s, n)
+    u1 = (bytes_to_long(fileHash) * c) % n
+    u2 = (r * c) % n
+    G = ECPoint(
+        ec_curve["p"],
+        ec_curve["a"],
+        ec_curve["b"],
+        ec_curve["Gx"],
+        ec_curve["Gy"],
+        ec_curve["n"])
+    point = ECPoint(
+        ec_curve["p"],
+        ec_curve["a"],
+        ec_curve["b"],
+        ec_key["x"],
+        ec_key["y"])
+    xy = G * u1 + point * u2
+    v = xy.x() % n
+    return v == r
+
+
+def sig_hash(signature, public_key_info, fileHashHex):
+    fileHash = binascii.a2b_hex(fileHashHex)
     algorithm = public_key_info.getComponentByName("algorithm")
     bitstr_key = public_key_info.getComponentByName("subjectPublicKey")
-    alg = str(algorithm)
+    algorithm0 = algorithm.getComponentByName("algorithm")
     parameters = algorithm.getComponentByName("parameters")
 
-    if alg == "1.2.840.113549.1.1.1":
+    if algorithm0 == univ.ObjectIdentifier("1.2.840.113549.1.1.1"):
         pubkey = bitstr_key.toOctets()
         rsakey = decode(pubkey, asn1Spec=RsaPubKey())[0]
         mod = rsakey.getComponentByName("modulus")._value
@@ -748,14 +983,10 @@ def sig_hash(signature, public_key_info, fileHash):
             if ord(byte) == 0x00:
                 break
         decoded_bytes = decoded_sig[idx:]
-        try:
-            v = binascii.hexlify(decode(decoded_bytes, asn1Spec=DigestInfo())[0].getComponentByName("digest")._value)
-        except Exception, e:
-            v = ""
-        if DEBUG:
-            print fileHash, v
+        v = decode(decoded_bytes, asn1Spec=DigestInfo())[0].getComponentByName("digest")._value
+        # if DEBUG:print binascii.b2a_hex(fileHash), binascii.b2a_hex(v)
         return fileHash == v
-    elif alg == "1.2.840.10040.4.1":
+    elif algorithm0 == univ.ObjectIdentifier("1.2.840.10040.4.1"):
         pubkey = bitstr_key.toOctets()
         dsakey = decode(pubkey, asn1Spec=DsaPubKey())[0]
         parameters = decode(parameters, asn1Spec=DssParams())[0]
@@ -764,30 +995,57 @@ def sig_hash(signature, public_key_info, fileHash):
             paramDict[param] = parameters.getComponentByName(param)._value
         key = paramDict
         return _dsa_decode(signature, key, fileHash)
+    elif algorithm0 == univ.ObjectIdentifier("1.2.840.10045.2.1"):
+        #{iso(1) member-body(2) us(840) ansi-x962(10045) keyType(2) ecPublicKey(1)}
+        pubkey = bitstr_key.toOctets()
+        certcurve = decode(parameters.asOctets())[0]
+        if pubkey[0] != '\x04':
+            # POINT_NULL         = (0x00,)
+            # POINT_COMPRESSED   = (0x02, 0x03)
+            # POINT_UNCOMPRESSED = (0x04,)
+            return False
+        # import ecdsa
+        # from ecdsa.util import sigdecode_der
+        # ec = ecdsa.VerifyingKey.from_string(pubkey[1:], curve=ecdsa.NIST256p)
+        # ret = ec.verify_digest(signature, fileHash,sigdecode=sigdecode_der)
+        # print ret
+        ec_curve = EC_CURVE.get(str(certcurve))
+        # print ec_curve
+        coord_size_p = int(math.ceil(math.log(ec_curve.get("p"), 2) / 8))
+        coord_size_n = int(math.ceil(math.log(ec_curve.get("n"), 2) / 8))
+        coord_size = coord_size_p# p or n ?
+        ec_key = {
+            "x":bytes_to_long(pubkey[1:coord_size + 1]),
+            "y":bytes_to_long(pubkey[coord_size + 1:]),
+        }
+        return _ecdsa_decode(signature, ec_curve, ec_key, fileHash)
     else:
+        print "unknown algorithm",algorithm0
         return None
-
 
 #######################################################
 #额外处理
 #######################################################
 class cert():
     def __init__(self, c):
+        raw_sig = binascii.b2a_base64(c.raw_der_data).replace("\n","")
         self.content = c
         self.issuer = str(c.tbsCertificate.issuer)
         self.subject = str(c.tbsCertificate.subject)
-        self.certmd5 = hashlib.md5(base64.encodestring(c.raw_der_data).replace("\n", "")).hexdigest()
+        self.certmd5 = hashlib.md5(raw_sig).hexdigest()
+        self.certbuf = "-----BEGIN CERTIFICATE-----\r\n%s\r\n-----END CERTIFICATE-----\r\n" % '\r\n'.join(raw_sig[pos:pos+64] for pos in xrange(0, len(raw_sig), 64))
         self.authkey = None
         self.subjkey = None
         if c.tbsCertificate.authKeyIdExt:
-            self.authkey = binascii.hexlify(c.tbsCertificate.authKeyIdExt.value.key_id)
+            self.authkey = binascii.b2a_hex(c.tbsCertificate.authKeyIdExt.value.key_id)
         if c.tbsCertificate.subjKeyIdExt:
-            self.subjkey = binascii.hexlify(c.tbsCertificate.subjKeyIdExt.value.subject_key_id)
+            self.subjkey = binascii.b2a_hex(c.tbsCertificate.subjKeyIdExt.value.subject_key_id)
         self.pub_key = c.tbsCertificate.pub_key_info
 
 
 #验证证书链父子关系
 def verify_certificate(c, cc):
+    # TODO: need a new way
     if c.signature_algorithm == "1.2.840.113549.1.1.4":  #RSA
         calculated_digest = hashlib.md5(c.tbs_encoded).hexdigest()
     elif c.signature_algorithm == "1.2.840.113549.1.1.5":
@@ -807,6 +1065,14 @@ def verify_certificate(c, cc):
 
 
 def check_sig(sigbuf="buf of CERT.RSA", sfbuf="buf of CERT.SF"):
+    ver_chain = []
+    all_certs = {}
+    ver_certs = set()
+    ext_certs = set()
+    bad_certs = set()
+    certs = {}
+    cert_chain = {}
+    verified_chain = []
     sfhash = {
         "1.2.840.113549.2.5": ["MD5", hashlib.md5(sfbuf).hexdigest()],
         "1.3.14.3.2.26": ["SHA1", hashlib.sha1(sfbuf).hexdigest()],
@@ -814,10 +1080,7 @@ def check_sig(sigbuf="buf of CERT.RSA", sfbuf="buf of CERT.SF"):
         "2.16.840.1.101.3.4.2.2": ["SHA384", hashlib.sha384(sfbuf).hexdigest()],
         "2.16.840.1.101.3.4.2.3": ["SHA512", hashlib.sha512(sfbuf).hexdigest()],
     }
-    certs = {}
-    cert_chain = {}
-    verified_chain = []
-    verified_certs = []
+    #"1.2.840.10045.4.3.2":#{iso(1) member-body(2) us(840) ansi-x962(10045) signatures(4) ecdsa-with-SHA2(3) ecdsa-with-SHA256(2)}
     p = PKCS7_SignedData(sigbuf)
     for c in p.certificates:
         #print c.raw_der_data
@@ -827,18 +1090,19 @@ def check_sig(sigbuf="buf of CERT.RSA", sfbuf="buf of CERT.SF"):
         mycert = cert(c)
         test = []
         certs[mycert.certmd5] = mycert
+        all_certs[mycert.certmd5] = [mycert.certmd5, mycert.subject, mycert.issuer]
         if mycert.subjkey:
             cert_chain[mycert.subjkey] = mycert.certmd5
         for r in p.signerInfos:
             #print r.signature
             #print r.digest_algorithm
             #print Hash_Algorithm_OID.get(r.digest_algorithm)
-            e, fileHash = sfhash.get(r.digest_algorithm, ["UNKNOWN", ""])
+            fileDigest, fileHash = sfhash.get(r.digest_algorithm, ["UNKNOWN", ""])
             v = sig_hash(r.signature, mycert.pub_key, fileHash)
             if v:
                 verified_chain.append([mycert.certmd5])
-                verified_certs.append([mycert.certmd5, e, fileHash])
-            test = [v, e, fileHash]
+                ver_certs.add(mycert.certmd5)
+            test = [v, fileDigest, fileHash]
         if DEBUG:
             print u'证书MD5 :', mycert.certmd5
             print u'签名HASH:', test
@@ -856,18 +1120,153 @@ def check_sig(sigbuf="buf of CERT.RSA", sfbuf="buf of CERT.SF"):
                 break
             if verify_certificate(certs[c].content, certs[cc].content):
                 onechain.append(cc)
+                ext_certs.add(cc)
             onebase = cc
-    if DEBUG:
-        print verified_certs
-        print verified_chain
-    ret = []
     for ch in verified_chain:
         chx = []
         for c in ch:
-            chx.append([c, certs[c].subject, certs[c].issuer])
-        ret.append(chx)
-    return ret
+            chx.append([c, certs[c].subject, certs[c].issuer, certs[c].certbuf])
+        ver_chain.append(chx)
+    bad_certs = set(all_certs.keys()).difference(ver_certs.union(ext_certs))
+    return ver_chain,all_certs,ver_certs,ext_certs,bad_certs
 
+def extract_list_by_int_prefix(data):
+    datas = []
+    idx = 0
+    while idx + 4 <= len(data):
+        i = struct.unpack("L",data[idx:idx+4])[0]
+        s = data[idx+4:idx+4+i]
+        idx += 4 + i
+        datas.append(s)
+        # print "debug",idx,len(data)
+        # buff2 = sig[idx:]
+        # print repr(buff2)
+    if idx != len(data):
+        print "warn",idx,len(data)
+    return datas
+
+def check_sig_v2(signedData, signatures, publicKeyBytes):
+    ver_chain = []
+    all_certs = {}
+    ver_certs = set()
+    ext_certs = set()
+    bad_certs = set()
+    certs = {}
+    cert_chain = {}
+    verified_chain = []
+    hashDigestType = {
+        0x0101 : "SHA256", #"SHA256withRSA/PSS", "SIGNATURE_RSA_PSS_WITH_SHA256",),
+        0x0102 : "SHA512", #"SHA512withRSA/PSS", "SIGNATURE_RSA_PSS_WITH_SHA512",),
+        0x0103 : "SHA256", #"SHA256withRSA",      "SIGNATURE_RSA_PKCS1_V1_5_WITH_SHA256",),
+        0x0104 : "SHA512", #"SHA512withRSA",      "SIGNATURE_RSA_PKCS1_V1_5_WITH_SHA512",),
+        0x0201 : "SHA256", #"SHA256withECDSA",    "SIGNATURE_ECDSA_WITH_SHA256",),
+        0x0202 : "SHA512", #"SHA512withECDSA",    "SIGNATURE_ECDSA_WITH_SHA512",),
+        0x0301 : "SHA256", #"SHA256withDSA",      "SIGNATURE_DSA_WITH_SHA256",),
+    }
+    '''
+RSA：1024、2048、4096、8192、16384
+EC：NIST P-256、P-384、P-521
+DSA：1024、2048、3072
+    '''
+    algs_for_zip = []
+    algs_for_sig = []
+    alg_sig_best = None
+    # alg_zip_best = None
+    ret = "v2BadCertSig"
+    idx = 0
+    for signature in extract_list_by_int_prefix(signatures):
+        while idx + 8 <= len(signature):
+            alg = struct.unpack("L",signature[idx:idx+4])[0]
+            i = struct.unpack("L",signature[idx+4:idx+8])[0]
+            s = signature[idx+8:idx+8+i]
+            idx += 8 + i
+            hashtype = hashDigestType.get(alg)
+            algs_for_sig.append((hashtype,s))
+            if alg_sig_best is None:
+                if hashtype:
+                    alg_sig_best = (hashtype,s)
+                else:
+                    print "unsupport alg",alg
+            elif alg_sig_best[0] == "SHA256" and hashtype == "SHA512":
+                alg_sig_best = (hashtype,s)
+            else:
+                pass
+    if alg_sig_best:
+        fileDigest,siginfo = alg_sig_best
+        public_key_info = decode(publicKeyBytes,asn1Spec=SubjectPublicKeyInfo())[0]
+        sfhash = {
+            # "MD5": hashlib.md5(hashs).hexdigest(),
+            # "SHA1": hashlib.sha1(hashs).hexdigest(),
+            "SHA256": hashlib.sha256(signedData).hexdigest(),
+            # "SHA384": hashlib.sha384(signedData).hexdigest(),
+            "SHA512": hashlib.sha512(signedData).hexdigest(),
+        }
+        fileHash = sfhash.get(fileDigest,"")
+        v = sig_hash(siginfo, public_key_info, fileHash)
+        if not v:
+            ret = "v2PubkeySigError"
+        else:
+            data2 = extract_list_by_int_prefix(signedData)
+            if len(data2) >= 2: # ingore additional attributes
+                digests, certificates = data2[:2]
+                for digest in extract_list_by_int_prefix(digests):
+                    idx = 0
+                    while idx + 8 <= len(digest):
+                        alg2 = struct.unpack("L",digest[idx:idx+4])[0]
+                        i2 = struct.unpack("L",digest[idx+4:idx+8])[0]
+                        s2 = digest[idx+8:idx+8+i2]
+                        idx += 8 + i2
+                        hashtype = hashDigestType.get(alg2)
+                        algs_for_zip.append((hashtype,s2))
+                        # if alg_zip_best is None:
+                        #     if hashtype:
+                        #         alg_zip_best = (hashtype,s)
+                        #     else:
+                        #         print "unsupport alg",alg2
+                        # elif alg_zip_best[0] == "SHA256" and hashtype== "SHA512":
+                        #     alg_zip_best = (hashtype,s)
+                        # else:
+                        #     pass
+                        # print s2
+                for certificate in extract_list_by_int_prefix(certificates):
+                    # c = decode(certificate,asn1Spec=Certificate())[0]
+                    c = PKCS7_X509Certificate(decode(certificate,asn1Spec=Certificate())[0])
+                    mycert = cert(c)
+                    certs[mycert.certmd5] = mycert
+                    all_certs[mycert.certmd5] = [mycert.certmd5, mycert.subject, mycert.issuer]
+                    if mycert.subjkey:
+                        cert_chain[mycert.subjkey] = mycert.certmd5
+                    if encode(mycert.pub_key) == publicKeyBytes:
+                        verified_chain.append([mycert.certmd5])
+                        ver_certs.add(mycert.certmd5)
+                    else:
+                        ret = "v2PubkeyNotCert"
+                    if DEBUG:
+                        print u'证书MD5 :', mycert.certmd5
+                        print u'签名HASH:', [v, fileDigest, fileHash]
+                        print u'颁发者  :', mycert.issuer
+                        print u'使用者  :', mycert.subject
+                        print u'证书链父:', mycert.authkey
+                        print u'证书链子:', mycert.subjkey
+                        print "-" * 79
+    for onechain in verified_chain:
+        onebase = onechain[0]
+        while certs[onebase].authkey and cert_chain.has_key(certs[onebase].authkey):
+            c = onebase
+            cc = cert_chain[certs[onebase].authkey]
+            if c == cc:
+                break
+            if verify_certificate(certs[c].content, certs[cc].content):
+                onechain.append(cc)
+                ext_certs.add(cc)
+            onebase = cc
+    for ch in verified_chain:
+        chx = []
+        for c in ch:
+            chx.append([c, certs[c].subject, certs[c].issuer, certs[c].certbuf])
+        ver_chain.append(chx)
+    bad_certs = set(all_certs.keys()).difference(ver_certs.union(ext_certs))
+    return ret,algs_for_zip,ver_chain,all_certs,ver_certs,ext_certs,bad_certs
 
 if __name__ == "__main__":
 
@@ -876,8 +1275,12 @@ if __name__ == "__main__":
         r"g:\work\8\f45368d392cf31eb0254330b1d80635f~\TrustTracker.v1.0.8-signed\META-INF\CERT.RSA",
         r"g:\work\8\f45368d392cf31eb0254330b1d80635f~\META-INF\CERT.RSA",
         r"G:\work\201404\4\1\3a368d197774a280b974baade9fc1756~\META-INF\PIP.DSA",
+        r"g:\work\201704\5e5b11108bbc431cfe8e9fa8e4b78d0e~\META-INF\AMAL.EC",
     ]:
+        import os
+        if not os.path.exists(f):
+            continue
         print "=" * 79
         sigdata = open(f, "rb").read()
-        sfdata = open(f[:-3] + "SF", "rb").read()
+        sfdata = open(f.rsplit(".",1)[0] + ".SF", "rb").read()
         print check_sig(sigdata, sfdata)
