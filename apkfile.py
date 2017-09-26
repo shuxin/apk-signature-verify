@@ -1,10 +1,13 @@
+#!/usr/bin/python
+# coding=utf-8
 """
-Read and write ZIP files.
+Read APK files.
 """
 import struct, os, sys
 import binascii, cStringIO
 import io
 import re
+
 try:
     import zlib # We may need its compression method
     crc32 = zlib.crc32
@@ -28,7 +31,7 @@ class LargeZipFile(Exception):
 error = BadZipfile      # The exception raised by this module
 
 ZIP64_LIMIT = (1 << 31) - 1
-ZIP_FILECOUNT_LIMIT = 1 << 16
+ZIP_FILECOUNT_LIMIT = (1 << 16) - 1
 ZIP_MAX_COMMENT = (1 << 16) - 1
 
 # constants for Zip file compression methods
@@ -276,6 +279,7 @@ class ZipInfo (object):
             'internal_attr',
             'external_attr',
             'header_offset',
+            'header_offset_shuxin',
             'CRC',
             'compress_size',
             'file_size',
@@ -374,7 +378,10 @@ class ZipInfo (object):
 
     def _decodeFilename(self):
         if self.flag_bits & 0x800:
-            return self.filename.decode('utf-8')
+            try:
+                return self.filename.decode('utf-8')
+            except UnicodeDecodeError,e:
+                raise BadZipfile("'utf8' codec can't decode filename in zip")
         else:
             return self.filename
 
@@ -639,6 +646,8 @@ class ApkFile(object):
             print endrec
         size_cd = endrec[_ECD_SIZE]             # bytes in central directory
         offset_cd = endrec[_ECD_OFFSET]         # offset of central directory
+        self.size_cd = size_cd
+        self.offset_cd = offset_cd
         self._comment = endrec[_ECD_COMMENT]    # archive comment
 
         # "concat" is zero, unless zip was concatenated to another file
@@ -681,6 +690,7 @@ class ApkFile(object):
                                      t>>11, (t>>5)&0x3F, (t&0x1F) * 2 )
 
             x._decodeExtra()
+            x.header_offset_shuxin = x.header_offset
             x.header_offset = x.header_offset + concat
             x.filename = x._decodeFilename()
             self.filelist.append(x)
@@ -740,7 +750,14 @@ class ApkFile(object):
 
     def read(self, name, pwd=None):
         """Return file bytes (as a string) for name."""
-        return self.open(name, "r", pwd).read()
+        try:
+            return self.open(name, "r", pwd).read()
+        except Exception,e_primary:
+            try:
+                return self.open_robust(name, "r", pwd).read()
+            except Exception,e:
+                pass
+            raise e_primary
 
     def open(self, name, mode="r", pwd=None):
         """Return file-like object for 'name'."""
@@ -788,6 +805,62 @@ class ApkFile(object):
                             zinfo.orig_filename, fname)
 
             # check for encrypted flag & handle password
+
+            zd = None
+            return ZipExtFile(zef_file, mode, zinfo, zd,
+                    close_fileobj=should_close)
+        except:
+            if should_close:
+                zef_file.close()
+            raise
+
+    def open_robust(self, name, mode="r", pwd=None):
+        """Return file-like object for 'name'."""
+        if mode not in ("r", "U", "rU"):
+            raise RuntimeError, 'open() requires mode "r", "U", or "rU"'
+        if not self.fp:
+            raise RuntimeError, \
+                  "Attempt to read ZIP archive that was already closed"
+
+        # Only open a new file for instances where we were not
+        # given a file object in the constructor
+        if self._filePassed:
+            zef_file = self.fp
+            should_close = False
+        else:
+            zef_file = open(self.filename, 'rb')
+            should_close = True
+
+        try:
+            # Make sure we have an info object
+            if isinstance(name, ZipInfo):
+                # 'name' is already an info object
+                zinfo = name
+            else:
+                # Get info object for name
+                zinfo = self.getinfo(name)
+
+            zef_file.seek(zinfo.header_offset_shuxin, 0)
+
+            # Skip the file header:
+            fheader = zef_file.read(sizeFileHeader)
+            if len(fheader) != sizeFileHeader:
+                raise BadZipfile("Truncated file header")
+            fheader = struct.unpack(structFileHeader, fheader)
+            if fheader[_FH_SIGNATURE] != stringFileHeader:
+                raise BadZipfile("Bad magic number for file header")
+
+            fname = zef_file.read(fheader[_FH_FILENAME_LENGTH])
+            if fheader[_FH_EXTRA_FIELD_LENGTH]:
+                zef_file.read(fheader[_FH_EXTRA_FIELD_LENGTH])
+
+            if fname != zinfo.orig_filename:
+                raise BadZipfile, \
+                        'File name in directory "%s" and header "%s" differ.' % (
+                            zinfo.orig_filename, fname)
+
+            # check for encrypted flag & handle password
+
             zd = None
             return ZipExtFile(zef_file, mode, zinfo, zd,
                     close_fileobj=should_close)
@@ -797,11 +870,15 @@ class ApkFile(object):
             raise
 
     def __del__(self):
+        """Call the "close()" method in case the user forgot."""
         self.close()
 
     def close(self):
+        """Close the file, and for mode "w" and "a" write the ending
+        records."""
         if self.fp is None:
             return
+
         try:
             pass
         finally:
