@@ -8,6 +8,8 @@ import math
 from asn1crypto import cms, x509
 from asn1crypto import algos, keys
 from asn1crypto import pem
+from asn1crypto.util import int_to_bytes as long_to_bytes
+from asn1crypto.util import int_from_bytes as bytes_to_long
 
 DEBUG = False
 
@@ -105,9 +107,6 @@ EC_CURVE['secp256k1'] = secp256k1
 
 ##########################################################################################################################################################################
 
-def bytes_to_long(encoded):
-    return reduce(lambda x, y: x * 256 + y, map(ord, encoded))
-
 def _fast_exponentiation(a, p, n):
     result = a % n
     remainders = []
@@ -143,9 +142,18 @@ def _inverse(z, a):
             return y2 % a
     raise Exception('Inverse Error')
 
+def fix_H_length(H, q):
+    # if the digest length is greater than the size of q use the BN_num_bits(dsa->q) leftmost bits of the digest, see fips 186-3, 4.2
+    bytes_H = long_to_bytes(H)
+    bytes_q = long_to_bytes(q)
+    if len(bytes_H) > len(bytes_q):
+        H = bytes_to_long(bytes_H[:len(bytes_q)])
+    return H
+
 def _dsa_verify((p, q, g), pub, H, (r, s)):
     if r <= 0 or r >= q or s <= 0 or s >= q:
         return False
+    H = fix_H_length(H, q)
     w = _inverse(s, q)
     u1, u2 = (H * w) % q, (r * w) % q
     v1 = pow(g, u1, p)
@@ -403,6 +411,8 @@ def verify_certificate(c, pc):
         tbsHashHex = hashlib.sha512(c_tbs_encoded).hexdigest()
     elif c_signature_algorithm == "1.2.840.10040.4.3":  #DSA
         tbsHashHex = hashlib.sha1(c_tbs_encoded).hexdigest()
+    elif c_signature_algorithm == "2.16.840.1.101.3.4.3.2":
+        tbsHashHex = hashlib.sha256(c_tbs_encoded).hexdigest()
     elif c_signature_algorithm == "1.2.840.10045.4.1":  #ecdsa
         tbsHashHex = hashlib.sha1(c_tbs_encoded).hexdigest()
     elif c_signature_algorithm == "1.2.840.10045.4.3.2":
