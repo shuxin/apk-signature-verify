@@ -425,7 +425,7 @@ def verify_chain(verified_certs, relation_cache, cert_cache):
                 break
             if verify_certificate(cert_cache[c].certobj, cert_cache[pc].certobj):
                 one_verified_chain.append(pc) # 附加到链上
-            on_chain = pc # 继续验证再父一级正好申诉
+            on_chain = pc # 继续验证再父一级证书
         if DEBUG:# 理论上是要验证根证书自签的，Android不需要，Android只是借用证书格式实际上只用公钥部分，ssl必须
             rootca = one_verified_chain[-1]
             self_signed = verify_certificate(cert_cache[rootca].certobj,cert_cache[rootca].certobj)
