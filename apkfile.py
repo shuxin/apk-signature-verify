@@ -3,11 +3,6 @@
 """
 Read APK files.
 """
-import sys
-if sys.version_info < (3,):
-    this_is_a__robust_version_zipfile__for__zip_with_password__or__zip_with_bad_data = True
-else:
-    raise ImportError("this module is not ready for python3 yet")
 import struct, os, sys
 import binascii, cStringIO
 import io
