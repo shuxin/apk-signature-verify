@@ -10,6 +10,8 @@ from asn1crypto import algos, keys
 from asn1crypto import pem
 from asn1crypto.util import int_to_bytes as long_to_bytes
 from asn1crypto.util import int_from_bytes as bytes_to_long
+from asn1crypto._types import bytes_to_list as _list
+from asn1crypto._types import chr_cls as _chr
 
 DEBUG = False
 
@@ -273,8 +275,76 @@ def _ecdsa_verify(ec_curve, ec_key, H, r, s):
     return v == r
 
 ##########################################################################################################################################################################
+FLAG_NOTHING = 0
+FLAG_256_PSS = 1
+FLAG_512_PSS = 2
 
-def sig_verify(signature, public_key_info, fileHashHex):
+def _pss_mgf1(_dst, _src, hashflag):
+    _h = hashlib.sha256
+    if hashflag == FLAG_256_PSS: _h = hashlib.sha256
+    if hashflag == FLAG_512_PSS: _h = hashlib.sha512
+    dst_len = len(_dst)
+    dst_lst = _list(_dst)
+    tmp = 0
+    while dst_len > 0:
+        tmp_lst = _list(_h(_src + struct.pack(">I", tmp)).digest())
+        mask_len = min(dst_len, len(_src))
+        for i in range(0, mask_len):
+            dst_lst[len(_dst) - dst_len + i] ^= tmp_lst[i]
+        dst_len -= mask_len
+        tmp += 1
+    return b"".join([_chr(c) for c in dst_lst])
+
+def _pss_verify(_buf, fileHash, hashflag):
+    _h = hashlib.sha256
+    if hashflag == FLAG_256_PSS: _h = hashlib.sha256
+    if hashflag == FLAG_512_PSS: _h = hashlib.sha512
+    print(len(_buf))
+    _xxx = _buf[:-1-len(fileHash)]
+    _yyy = _buf[-1-len(fileHash):-1]
+    ____ = _buf[-1:0] # b"\xbc"
+    _dec = _pss_mgf1(_xxx, _yyy, hashflag)
+    salt = _dec[-len(fileHash):]
+    _tmp = b"\0" * 8 + fileHash + salt
+    _zzz = _h(_tmp).digest()
+    return _yyy == _zzz
+
+'''
+                                 +-----------+
+                                 |     M     |
+                                 +-----------+
+                                       |
+                                       V
+                                     Hash
+                                       |
+                                       V
+                         +--------+----------+----------+
+                    M' = |Padding1|  mHash   |   salt   |
+                         +--------+----------+----------+
+                                        |
+              +--------+----------+     V
+        DB =  |Padding2|   salt   |   Hash
+              +--------+----------+     |
+                        |               |
+                        V               |
+                       xor <--- MGF <---|
+                        |               |
+                        |               |
+                        V               V
+              +-------------------+----------+--+
+        EM =  |    maskedDB       |     H    |bc|
+              +-------------------+----------+--+
+'''
+
+def fix_dsa_hash_length(H, q):
+    # if the digest length is greater than the size of q use the BN_num_bits(dsa->q) leftmost bits of the digest, see fips 186-3, 4.2
+    bytes_H = long_to_bytes(H)
+    bytes_q = long_to_bytes(q)
+    if len(bytes_H) > len(bytes_q):
+        H = bytes_to_long(bytes_H[:len(bytes_q)])
+    return H
+
+def sig_verify(signature, public_key_info, fileHashHex, hashflag=FLAG_NOTHING):
     fileHash = binascii.a2b_hex(fileHashHex)
     algorithm0 = public_key_info['algorithm']['algorithm'].dotted
     parameters = public_key_info['algorithm']['parameters'].native
@@ -285,19 +355,22 @@ def sig_verify(signature, public_key_info, fileHashHex):
         enc = bytes_to_long(signature)
         dec = _rsa_decode(enc, exp, mod)
         decoded_sig = long_to_bytes(dec)
-        idx = 0
-        for byte in decoded_sig:
-            if byte in [b for b in b"\x00\x01\xff"]:
-                idx += 1
-            if byte in [b for b in b"\x00"]:
-                break
-        decoded_bytes = decoded_sig[idx:]
-        try:
-            v = algos.DigestInfo.load(decoded_bytes)['digest'].native
-        except Exception as e:
-            v = "fuck"
-        # if DEBUG:print binascii.b2a_hex(fileHash), binascii.b2a_hex(v)
-        return fileHash == v
+        if hashflag == FLAG_NOTHING:
+            idx = 0
+            for byte in decoded_sig:
+                if byte in [b for b in b"\x00\x01\xff"]:
+                    idx += 1
+                if byte in [b for b in b"\x00"]:
+                    break
+            decoded_bytes = decoded_sig[idx:]
+            try:
+                v = algos.DigestInfo.load(decoded_bytes)['digest'].native
+            except Exception as e:
+                v = "fuck"
+            # if DEBUG:print binascii.b2a_hex(fileHash), binascii.b2a_hex(v)
+            return fileHash == v
+        else:
+            return _pss_verify(decoded_sig, fileHash, hashflag)
     elif algorithm0 == "1.2.840.10040.4.1":
         pub = public_key_info['public_key'].native
         p = parameters['p']
@@ -308,11 +381,7 @@ def sig_verify(signature, public_key_info, fileHashHex):
         r = rs["r"].native
         s = rs["s"].native
         H = bytes_to_long(fileHash)
-        # if the digest length is greater than the size of q use the BN_num_bits(dsa->q) leftmost bits of the digest, see fips 186-3, 4.2
-        bytes_H = long_to_bytes(H)
-        bytes_q = long_to_bytes(q)
-        if len(bytes_H) > len(bytes_q):
-            H = bytes_to_long(bytes_H[:len(bytes_q)])
+        H = fix_dsa_hash_length(H, q)
         return _dsa_verify(p, q, g, pub, H, r, s)
     elif algorithm0 == "1.2.840.10045.2.1":
         #{iso(1) member-body(2) us(840) ansi-x962(10045) keyType(2) ecPublicKey(1)}
@@ -323,11 +392,6 @@ def sig_verify(signature, public_key_info, fileHashHex):
             # POINT_COMPRESSED   = (0x02, 0x03)
             # POINT_UNCOMPRESSED = (0x04,)
             return False
-        # import ecdsa
-        # from ecdsa.util import sigdecode_der
-        # ec = ecdsa.VerifyingKey.from_string(pubkey[1:], curve=ecdsa.NIST256p)
-        # ret = ec.verify_digest(signature, fileHash,sigdecode=sigdecode_der)
-        # print ret
         ec_curve = EC_CURVE.get(str(certcurve))
         # print ec_curve
         coord_size_p = int(math.ceil(math.log(ec_curve.get("p"), 2) / 8))
@@ -341,6 +405,7 @@ def sig_verify(signature, public_key_info, fileHashHex):
         r = rs["r"].native
         s = rs["s"].native
         H = bytes_to_long(fileHash)
+        H = fix_dsa_hash_length(H, ec_curve.get("p"))
         return _ecdsa_verify(ec_curve, ec_key, H, r, s)
     else:
         # print "unknown algorithm",algorithm0
@@ -438,6 +503,7 @@ def check_sig_pkcs7(sigbuf=b"buf of CERT.RSA", sfbuf=b"buf of CERT.SF"):
         "2.16.840.1.101.3.4.2.1": ("SHA256", hashlib.sha256(sfbuf).hexdigest()),
         "2.16.840.1.101.3.4.2.2": ("SHA384", hashlib.sha384(sfbuf).hexdigest()),
         "2.16.840.1.101.3.4.2.3": ("SHA512", hashlib.sha512(sfbuf).hexdigest()),
+        "2.16.840.1.101.3.4.2.4": ("SHA244", hashlib.sha224(sfbuf).hexdigest()),
     }
     #"1.2.840.10045.4.3.2":#{iso(1) member-body(2) us(840) ansi-x962(10045) signatures(4) ecdsa-with-SHA2(3) ecdsa-with-SHA256(2)}
     p = cms.ContentInfo.load(sigbuf)
@@ -484,15 +550,14 @@ def check_sig_v2(signedData, signatures, publicKeyBytes):
     cert_cache = {} # 所有出现的证书
     relation_cache = {} # 记录签发关系
     verified_certs = [] # 完全验证的证书
-    # TODO: RSA with PSS
     hashDigestType = {
-        0x0101 : "SHA256", #"SHA256withRSA/PSS", "SIGNATURE_RSA_PSS_WITH_SHA256",),
-        0x0102 : "SHA512", #"SHA512withRSA/PSS", "SIGNATURE_RSA_PSS_WITH_SHA512",),
-        0x0103 : "SHA256", #"SHA256withRSA",      "SIGNATURE_RSA_PKCS1_V1_5_WITH_SHA256",),
-        0x0104 : "SHA512", #"SHA512withRSA",      "SIGNATURE_RSA_PKCS1_V1_5_WITH_SHA512",),
-        0x0201 : "SHA256", #"SHA256withECDSA",    "SIGNATURE_ECDSA_WITH_SHA256",),
-        0x0202 : "SHA512", #"SHA512withECDSA",    "SIGNATURE_ECDSA_WITH_SHA512",),
-        0x0301 : "SHA256", #"SHA256withDSA",      "SIGNATURE_DSA_WITH_SHA256",),
+        0x0101 : ("SHA256", FLAG_256_PSS ), #"SHA256withRSA/PSS", "SIGNATURE_RSA_PSS_WITH_SHA256",),
+        0x0102 : ("SHA512", FLAG_512_PSS ), #"SHA512withRSA/PSS", "SIGNATURE_RSA_PSS_WITH_SHA512",),
+        0x0103 : ("SHA256", FLAG_NOTHING ), #"SHA256withRSA",      "SIGNATURE_RSA_PKCS1_V1_5_WITH_SHA256",),
+        0x0104 : ("SHA512", FLAG_NOTHING ), #"SHA512withRSA",      "SIGNATURE_RSA_PKCS1_V1_5_WITH_SHA512",),
+        0x0201 : ("SHA256", FLAG_NOTHING ), #"SHA256withECDSA",    "SIGNATURE_ECDSA_WITH_SHA256",),
+        0x0202 : ("SHA512", FLAG_NOTHING ), #"SHA512withECDSA",    "SIGNATURE_ECDSA_WITH_SHA512",),
+        0x0301 : ("SHA256", FLAG_NOTHING ), #"SHA256withDSA",      "SIGNATURE_DSA_WITH_SHA256",),
     }
     '''
 RSA：1024、2048、4096、8192、16384
@@ -511,19 +576,19 @@ DSA：1024、2048、3072
             i = struct.unpack("L",signature[idx+4:idx+8])[0]
             s = signature[idx+8:idx+8+i]
             idx += 8 + i
-            hashtype = hashDigestType.get(alg)
+            hashtype, hashflag = hashDigestType.get(alg, ("UNKNOWN", 0))
             algs_for_sig.append((hashtype,s))
             if alg_sig_best is None:
                 if hashtype:
-                    alg_sig_best = (hashtype,s)
+                    alg_sig_best = (hashtype, hashflag, s)
                 else:
                     pass # print("unsupport alg",alg)
             elif alg_sig_best[0] == "SHA256" and hashtype == "SHA512":
-                alg_sig_best = (hashtype,s)
+                alg_sig_best = (hashtype, hashflag, s)
             else:
                 pass
     if alg_sig_best:
-        fileDigest,siginfo = alg_sig_best
+        fileDigest, hashflag, siginfo = alg_sig_best
         public_key_info = keys.PublicKeyInfo.load(publicKeyBytes)
         sfhash = {
             # "MD5": hashlib.md5(hashs).hexdigest(),
@@ -533,7 +598,7 @@ DSA：1024、2048、3072
             "SHA512": hashlib.sha512(signedData).hexdigest(),
         }
         fileHash = sfhash.get(fileDigest,"")
-        v = sig_verify(siginfo, public_key_info, fileHash)
+        v = sig_verify(siginfo, public_key_info, fileHash, hashflag)
         if not v:
             ret = "v2PubkeySigError"
         else:
@@ -547,7 +612,7 @@ DSA：1024、2048、3072
                         i2 = struct.unpack("L",digest[idx+4:idx+8])[0]
                         s2 = digest[idx+8:idx+8+i2]
                         idx += 8 + i2
-                        hashtype = hashDigestType.get(alg2)
+                        hashtype = hashDigestType.get(alg2, ("UNKNOWN", 0))
                         algs_for_zip.append((hashtype,s2))
                         # if alg_zip_best is None:
                         #     if hashtype:

@@ -43,7 +43,7 @@ class ApkSignature():
         self.sigv2 = None
         self.certs = {}
         self.chains = set()
-        self.why = []
+        self.errors = []
         self.apkpath = apkpath
         self.zfile = None
         if is_zipfile(self.apkpath):
@@ -73,7 +73,7 @@ class ApkSignature():
         try:
             for zipInfo in self.zfile.infolist():
                 # print repr(zipInfo.comment)
-                filename = zipInfo.filename
+                filename = zipInfo.orig_filename
                 # if type(filename) is str:
                 #     filename_binary = filename
                 # elif type(filename) is unicode:
@@ -90,7 +90,7 @@ class ApkSignature():
                                 if line == b'2':
                                     v2 = True
         except Exception as e:
-            self.why.append("GlobalZipReadError")
+            self.errors.append("GlobalZipReadError")
         return v2
 
     def verify(self, version=-1):
@@ -115,7 +115,7 @@ class ApkSignature():
                 if sig.endswith(".DSA") or sig.endswith(".RSA") or sig.endswith(".EC"):
                     sigv1sigs.append(sig)
             if len(sigv1sigs) == 0:
-                self.why.append("Sigv1SigFileLost")
+                self.errors.append("Sigv1SigFileLost")
                 return self.sigv1
             sigv1sfs = {}
             for sig in sigv1sigs:
@@ -123,7 +123,7 @@ class ApkSignature():
                 if sfbuf:
                     sigv1sfs[sig] = sfbuf
             if len(sigv1sfs) == 0:
-                self.why.append("Sigv1SfFileError")
+                self.errors.append("Sigv1SfFileError")
                 return self.sigv1
             sigv1verifys = []
             for sig, sfbuf in sigv1sfs.items():
@@ -136,7 +136,7 @@ class ApkSignature():
                     for chain in ver_chains:
                         self.chains.add(tuple(chain))
             if len(sigv1verifys) == 0:
-                self.why.append("Sigv1CertVerifyFailed")
+                self.errors.append("Sigv1CertVerifyFailed")
                 return self.sigv1
         return self.sigv1
 
@@ -148,7 +148,7 @@ class ApkSignature():
         sig, sigstart, sigend, cdend, filesize = self.__v2_zipfindsig()
         # print sig
         if not 0x7109871a in sig:
-            self.why.append("Sigv2SigPartLost")
+            self.errors.append("Sigv2SigPartLost")
             return self.sigv2
         else:
             sigv2sigs = []
@@ -169,12 +169,13 @@ class ApkSignature():
                         if len(ver_chains) > 0:
                             sigv2certs.append(ver_chains)
                             algs_for_zip_dict = {}
-                            for hashtype, hashvalue in algs_for_zip:
+                            for _hashtype_tuple_, hashvalue in algs_for_zip:
+                                (hashtype, _) = _hashtype_tuple_
                                 if not hashtype in algs_for_zip_dict:
                                     algs_for_zip_dict[hashtype] = hashvalue
                                 else:
                                     if algs_for_zip_dict[hashtype] != hashvalue:
-                                        self.why.append("Sigv2HashTypeError")
+                                        self.errors.append("Sigv2HashTypeError")
                                         return self.sigv2
                             if self.__v2_zipverify(sigstart, sigend, cdend, filesize, algs_for_zip_dict):
                                 sigv2verifys.append(ver_chains)
@@ -182,13 +183,13 @@ class ApkSignature():
                                     self.chains.add(tuple(chain))
                                     self.sigv2 = True
             if len(sigv2verifys) == 0:
-                self.why.append("Sigv2SigBuffError")
+                self.errors.append("Sigv2SigBuffError")
             else:
                 if len(sigv2certs) == 0:
-                    self.why.append("Sigv2CertVerifyFailed")
+                    self.errors.append("Sigv2CertVerifyFailed")
                 else:
                     if len(sigv2verifys) == 0:
-                        self.why.append("Sigv2ZipHashError")
+                        self.errors.append("Sigv2ZipHashError")
         return self.sigv2
 
     def all_certs(self, readable=False):
@@ -199,7 +200,7 @@ class ApkSignature():
         ret = []
         for k, v in self.certs.items():
             if readable:
-                ret.append(v[:2])
+                ret.append(v[:3])
             else:
                 ret.append(v[3])
         return ret
@@ -249,7 +250,7 @@ class ApkSignature():
         # else:
         #     s = "\n"
         # bl = buf.split(s * 2)
-        bl = re.split(b'(\n\r\n|\n\n)', __sf_buff)
+        bl = re.split(b'(\r\n\r\n|\n\n)', __sf_buff)
         bx = []
         for i in range(0, int(math.ceil(len(bl) * 1.0 / 2))):
             bx.append(b"".join(bl[i * 2:i * 2 + 2]))
@@ -262,10 +263,13 @@ class ApkSignature():
             # bs = b1.strip()
             # if len(bs) > 0:
             if b1.strip():
-                d = dict(map(lambda z: (z[0], z[1].rstrip()), filter(lambda y: len(y) == 2,
-                                                                     map(lambda x: x.split(b": ", 1),
-                                                                         re.sub(b"(\r|)\n ", b"", b1).strip().split(
-                                                                             b"\n")))))
+                d = dict(map(
+                    lambda z: (z[0], z[1]), filter(
+                        lambda y: len(y) == 2,map(
+                            lambda x: x.split(b": ", 1),re.split(b"(\r?\n)\\b",re.sub(b"(\r|)\n ", b"", b1))
+                        )
+                    )
+                ))
                 # print d
                 # d = dict(map(lambda z: (z[0], z[1]), filter(lambda y: len(y) == 2, map(lambda x: x.split(": ", 1), bs.replace(s + " ", "").split(s)))))
                 if b"Name" in d:
@@ -290,21 +294,40 @@ class ApkSignature():
 
     @classmethod
     def __v1_hash_digest_verify(cls, Attributes_attributes, String_entry, byte_data):
+        Failed = 0
+        Verify = 0
         for k, v in Attributes_attributes.items():
             if k.endswith(String_entry):
                 x = k[:-len(String_entry)].upper()
                 h = binascii.a2b_base64(v)
                 if x == b"SHA-512":
-                    return hashlib.sha512(byte_data).digest() == h
+                    if hashlib.sha512(byte_data).digest() == h:
+                        Verify += 1
+                    else:
+                        Failed += 1
                 elif x == b"SHA-384":
-                    return hashlib.sha384(byte_data).digest() == h
+                    if hashlib.sha384(byte_data).digest() == h:
+                        Verify += 1
+                    else:
+                        Failed += 1
                 elif x == b"SHA-256":
-                    return hashlib.sha256(byte_data).digest() == h
+                    if hashlib.sha256(byte_data).digest() == h:
+                        Verify += 1
+                    else:
+                        Failed += 1
                 elif x == b"SHA1":
-                    return hashlib.sha1(byte_data).digest() == h
+                    if hashlib.sha1(byte_data).digest() == h:
+                        Verify += 1
+                    else:
+                        Failed += 1
                 else:
-                    return None
-        return None
+                    pass#return None
+        if Failed:
+            return False
+        elif Verify:
+            return True
+        else:
+            return None
 
     def __v1_jarverifymanifest(self):
         dupfile_in_bytes = {}
@@ -313,11 +336,11 @@ class ApkSignature():
             self.__mf_dict = self.__v1_jarmf2dict(self.__mf_buff)
         except Exception as e:
             # logging.exception(e)
-            self.why.append(u"Sigv1MfFileError")
+            self.errors.append(u"Sigv1MfFileError")
             return False
         for zipInfo in self.zfile.infolist():
             # print repr(zipInfo.comment)
-            filename = zipInfo.filename
+            filename = zipInfo.orig_filename
             if filename.endswith(u"/"):
                 continue
             if filename.startswith(u"META-INF/"):
@@ -331,23 +354,23 @@ class ApkSignature():
                 dupfile_in_bytes[filename_binary] = 1
             else:
                 dupfile_in_bytes[filename_binary] += 1
-                self.why.append(u"GlobalZipDupEntry %s" % filename)
+                self.errors.append(u"GlobalZipDupEntry %s" % filename)
                 return False
             mf_data = self.__mf_dict.get(filename_binary)
             if mf_data:
-                buf = self.zfile.read(filename)
+                buf = self.zfile.read(zipInfo)
                 vok = self.__v1_hash_digest_verify(mf_data, b"-Digest", buf)
                 if vok is None:
-                    self.why.append("Sigv1HashTypeError %s" % filename)
+                    self.errors.append("Sigv1HashTypeError %s" % filename)
                     return False
                 elif vok == False:
-                    self.why.append("Sigv1HashFileFailed %s" % filename)
+                    self.errors.append("Sigv1HashFileFailed %s" % filename)
                     return False
                 else:
                     pass  # True
             else:
                 # print mf_dict
-                self.why.append("Sigv1HashFileLost %s" % filename)
+                self.errors.append("Sigv1HashFileLost %s" % filename)
                 # 0 byte filehash lost in manifest.mf is OK
                 if zipInfo.file_size > 0:
                     return False
@@ -365,10 +388,10 @@ class ApkSignature():
                 else:
                     lostother += 1
             if lostother > 0:
-                self.why.append(u"Sigv1SomeFileLost %d" % (lostother + lostdexs,))
+                self.errors.append(u"Sigv1SomeFileLost %d" % (lostother + lostdexs,))
                 return False
             elif lostdexs > 0:
-                self.why.append(u"Sigv1ClassDexLost %d" % (lostdexs,))
+                self.errors.append(u"Sigv1ClassDexLost %d" % (lostdexs,))
                 return False
         return True
 
@@ -378,7 +401,7 @@ class ApkSignature():
             sf_dic = self.__v1_jarmf2dict(sf_buf)
         except Exception as e:
             # logging.exception(e)
-            self.why.append(u"Sigv1SfFileError")
+            self.errors.append(u"Sigv1SfFileError")
             return False
         mfv = sf_dic.pop(b"META-INF/MANIFEST.MF", {})
         # ignore   "-Digest-Manifest-Main-Attributes"
@@ -398,29 +421,29 @@ class ApkSignature():
             if sfk.startswith(b"META-INF/"):
                 pass
             elif sfk in self.__mf_dict:
-                buff = self.__mf_dict[sfk][u"buf"]
-                buf2 = self.__mf_dict[sfk][u"buf2"]
+                buff = self.__mf_dict[sfk][b"buf"]
+                buf2 = self.__mf_dict[sfk][b"buf2"]
                 digest_suffix = b"-Digest"
                 vok = self.__v1_hash_digest_verify(sfv, b"-Digest", buff)
                 if vok is None:
                     digest_suffix = b"-Digest-Manifest"
                     vok = self.__v1_hash_digest_verify(sfv, b"-Digest-Manifest", buff)
                 if vok is None:
-                    self.why.append(u"Sigv1HashLineError")
+                    self.errors.append(u"Sigv1HashLineError")
                     return False
                 elif vok == False:
                     vok = self.__v1_hash_digest_verify(sfv, digest_suffix, buf2)
                     if vok == False:
                         # print sfv
                         # print repr(buf2)
-                        self.why.append(u"Sigv1HashLineFailed")
+                        self.errors.append(u"Sigv1HashLineFailed")
                         return False
                     else:
                         pass  # None True
                 else:
                     pass  # True
             else:
-                self.why.append(u"Sigv1HashLineLost")
+                self.errors.append(u"Sigv1HashLineLost")
                 return False
         lostline = list(set(self.__mf_dict.keys()).difference(set(sf_dic.keys())))
         if len(lostline) > 0:
@@ -432,7 +455,7 @@ class ApkSignature():
                 else:
                     lostother += 1
             if lostother > 0:
-                self.why.append(u"Sigv1SomeLineLost")
+                self.errors.append(u"Sigv1SomeLineLost")
                 return False
             else:
                 pass
@@ -564,7 +587,7 @@ if __name__ == "__main__":
     v_ver1 = a.verify(1)  # force check version 1
     v_ver2 = a.verify(2)  # force check version 2
     print("Verify:", sigver, v_auto, v_ver1, v_ver2)
-    for line in a.why:
+    for line in a.errors:
         print("Error:", line)
     all_certs = a.all_certs()
     sig_certs = a.get_certs()
