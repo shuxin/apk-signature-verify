@@ -10,14 +10,18 @@ import sys
 import re
 import os
 
+ApkFile = None
 if sys.version_info < (3,):
-    # this_is_a__robust_version_zipfile__for__zip_with_password__or__zip_with_bad_data
-    from apkfile import ApkFile, is_zipfile
-    from apkfile import _EndRecData, _ECD_SIZE, _ECD_OFFSET
-else:
-    from zipfile import ZipFile as ApkFile, is_zipfile
-    from zipfile import _EndRecData, _ECD_SIZE, _ECD_OFFSET
-from pkcs7verify import check_sig_pkcs7, check_sig_v2
+    try:
+        # this_is_a__robust_version_zipfile__for__zip_with_password__or__zip_with_bad_data
+        from apkfile import is_zipfile, _EndRecData, _ECD_SIZE, _ECD_OFFSET
+        from apkfile import ApkFile
+    except ImportError as e:
+        pass
+if ApkFile is None:
+    from zipfile import is_zipfile, _EndRecData, _ECD_SIZE, _ECD_OFFSET
+    from zipfile import ZipFile as ApkFile
+from sigverify import check_sig_pkcs7, check_sig_v2
 
 if sys.version_info < (3,):
     unicode_cls = unicode
