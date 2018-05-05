@@ -52,7 +52,7 @@ if __name__ == "__main__":
             import logging
             logging.exception(e)
             print(e)
-            log_verify = e
-        log.write(("u%s\t%s\n" % (log_verify, filename)).encode("utf8"))
+            log_verify = type(e)
+        log.write((u"%s\t%s\n" % (log_verify, filename)).encode("utf8"))
         log.flush()
     log.close()

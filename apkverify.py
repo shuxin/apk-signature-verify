@@ -51,10 +51,7 @@ class ApkSignature():
         self.apkpath = apkpath
         self.zfile = None
         if is_zipfile(self.apkpath):
-            try:
-                self.zfile = ApkFile(self.apkpath, 'r')
-            except Exception as e:
-                pass
+            self.zfile = ApkFile(self.apkpath, 'r')
         if self.zfile is None:
             raise Exception(u"bad zip")
         # print repr(zfile._comment)

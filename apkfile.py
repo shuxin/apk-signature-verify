@@ -8,6 +8,7 @@ import binascii, cStringIO
 import io
 import re
 
+# not ready for python 3
 try:
     import zlib # We may need its compression method
     crc32 = zlib.crc32
