@@ -1,6 +1,7 @@
 #!/usr/bin/python
 # coding=utf-8
 import binascii
+import logging
 import hashlib
 import struct
 import math
@@ -345,71 +346,70 @@ def fix_dsa_hash_length(H, q):
     return H
 
 def sig_verify(signature, public_key_info, fileHashHex, hashflag=FLAG_NOTHING):
-    fileHash = binascii.a2b_hex(fileHashHex)
-    algorithm0 = public_key_info['algorithm']['algorithm'].dotted
-    parameters = public_key_info['algorithm']['parameters'].native
+    try:
+        fileHash = binascii.a2b_hex(fileHashHex)
+        algorithm0 = public_key_info['algorithm']['algorithm'].dotted
+        parameters = public_key_info['algorithm']['parameters'].native
 
-    if algorithm0 == "1.2.840.113549.1.1.1":
-        mod = public_key_info['public_key'].native['modulus']
-        exp = public_key_info['public_key'].native['public_exponent']
-        enc = bytes_to_long(signature)
-        dec = _rsa_decode(enc, exp, mod)
-        decoded_sig = long_to_bytes(dec)
-        if hashflag == FLAG_NOTHING:
-            idx = 0
-            for byte in decoded_sig:
-                if byte in [b for b in b"\x00\x01\xff"]:
-                    idx += 1
-                if byte in [b for b in b"\x00"]:
-                    break
-            decoded_bytes = decoded_sig[idx:]
-            try:
+        if algorithm0 == "1.2.840.113549.1.1.1":
+            mod = public_key_info['public_key'].native['modulus']
+            exp = public_key_info['public_key'].native['public_exponent']
+            enc = bytes_to_long(signature)
+            dec = _rsa_decode(enc, exp, mod)
+            decoded_sig = long_to_bytes(dec)
+            if hashflag == FLAG_NOTHING:
+                idx = 0
+                for byte in decoded_sig:
+                    if byte in [b for b in b"\x00\x01\xff"]:
+                        idx += 1
+                    if byte in [b for b in b"\x00"]:
+                        break
+                decoded_bytes = decoded_sig[idx:]
                 v = algos.DigestInfo.load(decoded_bytes)['digest'].native
-            except Exception as e:
-                v = "fuck"
-            # if DEBUG:print binascii.b2a_hex(fileHash), binascii.b2a_hex(v)
-            return fileHash == v
-        else:
-            return _pss_verify(decoded_sig, fileHash, hashflag)
-    elif algorithm0 == "1.2.840.10040.4.1":
-        pub = public_key_info['public_key'].native
-        p = parameters['p']
-        q = parameters['q']
-        g = parameters['g']
-        #print encoded
-        rs = algos.DSASignature.load(signature)
-        r = rs["r"].native
-        s = rs["s"].native
-        H = bytes_to_long(fileHash)
-        H = fix_dsa_hash_length(H, q)
-        return _dsa_verify(p, q, g, pub, H, r, s)
-    elif algorithm0 == "1.2.840.10045.2.1":
-        #{iso(1) member-body(2) us(840) ansi-x962(10045) keyType(2) ecPublicKey(1)}
-        pubkey = public_key_info['public_key'].native
-        certcurve = parameters
-        if pubkey[0] != b'\x04'[0]:
-            # POINT_NULL         = (0x00,)
-            # POINT_COMPRESSED   = (0x02, 0x03)
-            # POINT_UNCOMPRESSED = (0x04,)
-            return False
-        ec_curve = EC_CURVE.get(str(certcurve))
-        # print ec_curve
-        coord_size_p = int(math.ceil(math.log(ec_curve.get("p"), 2) / 8))
-        coord_size_n = int(math.ceil(math.log(ec_curve.get("n"), 2) / 8))
-        coord_size = coord_size_p# p or n ?
-        ec_key = {
-            "x":bytes_to_long(pubkey[1:coord_size + 1]),
-            "y":bytes_to_long(pubkey[coord_size + 1:]),
-        }
-        rs = algos.DSASignature.load(signature)
-        r = rs["r"].native
-        s = rs["s"].native
-        H = bytes_to_long(fileHash)
-        H = fix_dsa_hash_length(H, ec_curve.get("p"))
-        return _ecdsa_verify(ec_curve, ec_key, H, r, s)
-    else:
-        # print "unknown algorithm",algorithm0
-        return None
+                # if DEBUG:print binascii.b2a_hex(fileHash), binascii.b2a_hex(v)
+                return fileHash == v
+            else:
+                return _pss_verify(decoded_sig, fileHash, hashflag)
+        elif algorithm0 == "1.2.840.10040.4.1":
+            pub = public_key_info['public_key'].native
+            p = parameters['p']
+            q = parameters['q']
+            g = parameters['g']
+            #print encoded
+            rs = algos.DSASignature.load(signature)
+            r = rs["r"].native
+            s = rs["s"].native
+            H = bytes_to_long(fileHash)
+            H = fix_dsa_hash_length(H, q)
+            return _dsa_verify(p, q, g, pub, H, r, s)
+        elif algorithm0 == "1.2.840.10045.2.1":
+            #{iso(1) member-body(2) us(840) ansi-x962(10045) keyType(2) ecPublicKey(1)}
+            pubkey = public_key_info['public_key'].native
+            certcurve = parameters
+            if pubkey[0] != b'\x04'[0]:
+                # POINT_NULL         = (0x00,)
+                # POINT_COMPRESSED   = (0x02, 0x03)
+                # POINT_UNCOMPRESSED = (0x04,)
+                return False
+            ec_curve = EC_CURVE.get(str(certcurve))
+            # print ec_curve
+            coord_size_p = int(math.ceil(math.log(ec_curve.get("p"), 2) / 8))
+            coord_size_n = int(math.ceil(math.log(ec_curve.get("n"), 2) / 8))
+            coord_size = coord_size_p# p or n ?
+            ec_key = {
+                "x":bytes_to_long(pubkey[1:coord_size + 1]),
+                "y":bytes_to_long(pubkey[coord_size + 1:]),
+            }
+            rs = algos.DSASignature.load(signature)
+            r = rs["r"].native
+            s = rs["s"].native
+            H = bytes_to_long(fileHash)
+            H = fix_dsa_hash_length(H, ec_curve.get("p"))
+            return _ecdsa_verify(ec_curve, ec_key, H, r, s)
+    except Exception as e:
+        logging.exception(e)
+    # print "unknown algorithm",algorithm0
+    return None
 
 #######################################################
 #额外处理

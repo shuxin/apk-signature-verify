@@ -214,7 +214,7 @@ Read the test.py for how to use.
 (False, True)	v2-only-targetSandboxVersion-3.apk
 <class 'zipfile.BadZipFile'>	v2-only-truncated-cd.apk
 (False, True)	v2-only-two-signers-second-signer-no-sig.apk
-<class 'ValueError'>	v2-only-two-signers-second-signer-no-supported-sig.apk
+(False, True)	v2-only-two-signers-second-signer-no-supported-sig.apk
 (False, True)	v2-only-two-signers.apk
 (False, True)	v2-only-unknown-pair-in-apk-sig-block.apk
 (False, False)	v2-only-with-dsa-sha256-1024-sig-does-not-verify.apk
