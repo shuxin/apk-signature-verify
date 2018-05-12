@@ -30,7 +30,7 @@ DEBUG = True
 
 
 class ApkSignature():
-    def __init__(self, apkpath=u"test.apk"):
+    def __init__(self, apkpath=u"test.apk",fd=None):
         self.verified = False
         self.sigv1 = None
         self.__mf_buff = b""
@@ -38,12 +38,16 @@ class ApkSignature():
         self.__files_in_metainf = []
         self.sigv2 = None
         self.certs = {}
-        self.chains = set()
+        self.chains1 = set()
+        self.chains2 = set()
         self.errors = []
         self.apkpath = apkpath
         self.zfile = None
-        if is_zipfile(self.apkpath):
-            self.zfile = ApkFile(self.apkpath, 'r')
+        if fd:
+            self.zfile = ApkFile(fd, 'r')
+        else:
+            if is_zipfile(self.apkpath):
+                self.zfile = ApkFile(self.apkpath, 'r')
         if self.zfile is None:
             raise Exception(u"bad zip")
         # print repr(zfile._comment)
@@ -127,7 +131,7 @@ class ApkSignature():
                     self.sigv1 = True
                     sigv1verifys.append(sig)
                     for chain in ver_chains:
-                        self.chains.add(tuple(chain))
+                        self.chains1.add(tuple(chain))
             if len(sigv1verifys) == 0:
                 self.errors.append("Sigv1CertVerifyFailed")
                 return self.sigv1
@@ -173,7 +177,7 @@ class ApkSignature():
                             if self.__v2_zipverify(sigstart, sigend, cdend, filesize, algs_for_zip_dict):
                                 sigv2verifys.append(ver_chains)
                                 for chain in ver_chains:
-                                    self.chains.add(tuple(chain))
+                                    self.chains2.add(tuple(chain))
                                     self.sigv2 = True
             if len(sigv2verifys) == 0:
                 self.errors.append("Sigv2SigBuffError")
@@ -198,14 +202,14 @@ class ApkSignature():
                 ret.append(v[3])
         return ret
 
-    def get_certs(self, readable=False, include_on_chain=False):
+    def get_certs(self, version=-1, readable=False, include_on_chain=False):
         '''
         :param pem: PEM or Readable Tuple
         :param include_on_chain: include ALL cert on chain (from chain head to ROOT CA, all of them)
         :return:
         '''
         ret = []
-        for one_chain in self.chains:
+        for one_chain in self.__get_chains(version):
             for crt in one_chain:
                 v = self.certs.get(crt)
                 if readable:
@@ -216,13 +220,13 @@ class ApkSignature():
                     break
         return ret
 
-    def get_chains(self, readable=False):
+    def get_chains(self, version=-1, readable=False):
         '''
         :param pem: PEM or Readable Tuple
         :return:
         '''
         ret = []
-        for one_chain in self.chains:
+        for one_chain in self.__get_chains(version):
             ret_chain = []
             for crt in one_chain:
                 v = self.certs.get(crt)
@@ -232,6 +236,17 @@ class ApkSignature():
                     ret_chain.append(v[3])
             ret.append(ret_chain)
         return ret
+
+    def __get_chains(self,version=-1):
+        chains = []
+        if version == 1:
+            chains.extend(self.chains1)
+        elif version == 2:
+            chains.extend(self.chains2)
+        else:
+            chains.extend(self.chains1)
+            chains.extend(self.chains2)
+        return chains
 
     @classmethod
     def __v1_jarmf2dict(cls, __sf_buff):
