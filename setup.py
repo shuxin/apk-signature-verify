@@ -6,6 +6,7 @@ from __future__ import absolute_import, unicode_literals
 from setuptools import setup
 from codecs import open
 from os import path
+import apkverify
 
 here = path.abspath(path.dirname(__file__))
 
@@ -13,20 +14,16 @@ here = path.abspath(path.dirname(__file__))
 with open(path.join(here, 'README.md'), 'r', encoding='utf-8') as f:
     readme = f.read()
 
-about = {}
-with open(path.join(here, 'apkverify', '__init__.py'), 'r', 'utf-8') as f:
-    exec(f.read().encode(), about)
-
 setup(
-    name=about['__title__'],
-    version=about['__version__'],
-    description=about['__description__'],
+    name=apkverify.__title__,
+    version=apkverify.__version__,
+    description=apkverify.__description__,
     long_description=readme,
     long_description_content_type='text/markdown',
-    author=about['__author__'],
-    author_email=about['__author_email__'],
-    url=about['__url__'],
-    license=about['__license__'],
+    author=apkverify.__author__,
+    author_email=apkverify.__author_email__,
+    url=apkverify.__url__,
+    license=apkverify.__license__,
     packages=['apkverify'],
     python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*',
     install_requires=['asn1crypto>=0.24.0'],
