@@ -7,7 +7,16 @@ dist/
 __pycache__/
 *.so
 *~
+.idea
+
 
 # due to using tox and pytest
 .tox
 .cache
+.idea/apk-signature-verify.iml
+.idea/encodings.xml
+.idea/inspectionProfiles/
+.idea/misc.xml
+.idea/modules.xml
+.idea/workspace.xml
+.idea/vcs.xml
