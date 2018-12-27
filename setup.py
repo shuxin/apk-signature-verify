@@ -6,7 +6,7 @@ from __future__ import absolute_import, unicode_literals
 from setuptools import setup
 from codecs import open
 from os import path
-import apkverify
+from apkverify.metadata import __title__, __version__, __description__, __url__, __author__, __author_email__, __license__
 
 here = path.abspath(path.dirname(__file__))
 
@@ -15,15 +15,15 @@ with open(path.join(here, 'README.md'), 'r', encoding='utf-8') as f:
     readme = f.read()
 
 setup(
-    name=apkverify.__title__,
-    version=apkverify.__version__,
-    description=apkverify.__description__,
+    name=__title__,
+    version=__version__,
+    description=__description__,
     long_description=readme,
     long_description_content_type='text/markdown',
-    author=apkverify.__author__,
-    author_email=apkverify.__author_email__,
-    url=apkverify.__url__,
-    license=apkverify.__license__,
+    author=__author__,
+    author_email=__author_email__,
+    url=__url__,
+    license=__license__,
     packages=['apkverify'],
     python_requires='>=2.7, !=3.0.*, !=3.1.*, !=3.2.*, !=3.3.*',
     install_requires=['asn1crypto>=0.24.0'],
