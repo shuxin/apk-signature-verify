@@ -8,10 +8,10 @@ import sys
 import argparse
 
 try:
-    from .__init__ import __version__
+    from .metadata import __version__
     from .check_apk import is_apk_file
 except (ValueError, ImportError):
-    from __init__ import __version__
+    from metadata import __version__
     from check_apk import is_apk_file
 
 if sys.version_info < (3,):
